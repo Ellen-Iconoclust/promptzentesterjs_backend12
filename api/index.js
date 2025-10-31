@@ -40,7 +40,36 @@ try {
     db.run(`INSERT OR IGNORE INTO users (username, password, role) VALUES (?, ?, ?)`, 
       ['admin', adminPasswordHash, 'admin']);
     
-    console.log('Database initialized with admin user: admin / admin123');
+    // Insert some sample prompts for testing
+    const samplePrompts = [
+      {
+        username: 'admin',
+        title: 'Cyberpunk Cityscape',
+        tagline: 'Futuristic neon-lit urban environment',
+        model: 'Midjourney',
+        text: 'Create a cyberpunk cityscape at night with neon lights, flying cars, and towering skyscrapers. Use vibrant colors like electric blue, hot pink, and neon green. Style: cinematic, detailed, 8k resolution --ar 16:9',
+        image_data: 'https://images.unsplash.com/photo-1487958449943-2429e8be8625?w=400&h=300&fit=crop',
+        accepted: 1,
+        isTrending: 1
+      },
+      {
+        username: 'admin',
+        title: 'Fantasy Dragon',
+        tagline: 'Majestic dragon in mystical landscape',
+        model: 'DALL-E',
+        text: 'A majestic dragon with iridescent scales flying over a mystical landscape with floating islands and waterfalls. Epic fantasy style, highly detailed, dramatic lighting --ar 3:2',
+        image_data: 'https://images.unsplash.com/photo-1518709268805-4e9042af2176?w=400&h=300&fit=crop',
+        accepted: 1,
+        isTrending: 1
+      }
+    ];
+    
+    samplePrompts.forEach(prompt => {
+      db.run(`INSERT OR IGNORE INTO prompts (username, title, tagline, model, text, image_data, accepted, isTrending) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+        [prompt.username, prompt.title, prompt.tagline, prompt.model, prompt.text, prompt.image_data, prompt.accepted, prompt.isTrending]);
+    });
+    
+    console.log('Database initialized with admin user: admin / admin123 and sample prompts');
   });
   
 } catch (error) {
@@ -72,7 +101,7 @@ module.exports = async (req, res) => {
   });
 
   try {
-    // ✅ FIXED: Better path parsing for Vercel
+    // Better path parsing for Vercel
     const url = new URL(req.url, `http://${req.headers.host}`);
     const path = url.pathname;
     console.log(`Incoming request: ${req.method} ${path}`);
@@ -124,17 +153,21 @@ const jwt = {
     return `${encodedHeader}.${encodedPayload}.${signature}`;
   },
   verify: (token, secret) => {
-    const [encodedHeader, encodedPayload, signature] = token.split('.');
-    const expectedSignature = crypto
-      .createHmac('sha256', secret)
-      .update(`${encodedHeader}.${encodedPayload}`)
-      .digest('base64url');
-    
-    if (signature !== expectedSignature) {
+    try {
+      const [encodedHeader, encodedPayload, signature] = token.split('.');
+      const expectedSignature = crypto
+        .createHmac('sha256', secret)
+        .update(`${encodedHeader}.${encodedPayload}`)
+        .digest('base64url');
+      
+      if (signature !== expectedSignature) {
+        throw new Error('Invalid token signature');
+      }
+      
+      return JSON.parse(Buffer.from(encodedPayload, 'base64url').toString());
+    } catch (error) {
       throw new Error('Invalid token');
     }
-    
-    return JSON.parse(Buffer.from(encodedPayload, 'base64url').toString());
   }
 };
 
@@ -393,7 +426,11 @@ async function handleCreatePrompt(req, res) {
     
     return res.status(201).json(processedPrompt);
   } catch (error) {
-    return res.status(401).json({ error: 'Invalid token' });
+    console.error('Create prompt error:', error);
+    if (error.message === 'Invalid token' || error.message === 'No token provided') {
+      return res.status(401).json({ error: 'Authentication required' });
+    }
+    return res.status(500).json({ error: 'Failed to create prompt: ' + error.message });
   }
 }
 
