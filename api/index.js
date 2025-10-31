@@ -62,7 +62,8 @@ const corsHeaders = {
 module.exports = async (req, res) => {
   // Handle CORS preflight
   if (req.method === 'OPTIONS') {
-    return res.status(200).set(corsHeaders).end();
+    res.writeHead(200, corsHeaders);
+    return res.end();
   }
 
   // Set CORS headers for all responses
@@ -71,8 +72,9 @@ module.exports = async (req, res) => {
   });
 
   try {
-    const path = req.url.split('?')[0];
-    
+    // ✅ FIXED: Better path parsing for Vercel
+    const url = new URL(req.url, `http://${req.headers.host}`);
+    const path = url.pathname;
     console.log(`Incoming request: ${req.method} ${path}`);
     
     // Route handling
