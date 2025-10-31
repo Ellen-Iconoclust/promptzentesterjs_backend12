@@ -76,8 +76,23 @@ try {
   console.error('Database initialization error:', error);
 }
 
-// Promisify database methods
-const dbRun = promisify(db.run.bind(db));
+// ✅ FIXED: Custom promisified database methods that properly return lastID
+const dbRun = (sql, params = []) => {
+  return new Promise((resolve, reject) => {
+    db.run(sql, params, function(err) {
+      if (err) {
+        reject(err);
+      } else {
+        // ✅ FIXED: Return both lastID and changes
+        resolve({ 
+          lastID: this.lastID, 
+          changes: this.changes 
+        });
+      }
+    });
+  });
+};
+
 const dbGet = promisify(db.get.bind(db));
 const dbAll = promisify(db.all.bind(db));
 
@@ -407,14 +422,29 @@ async function handleCreatePrompt(req, res) {
     // Store image as base64 in database
     const imageData = image_url || null;
     
+    console.log('Creating prompt for user:', user.username);
+    console.log('Prompt data:', { title, tagline, model });
+    
+    // ✅ FIXED: Use our custom dbRun that properly returns lastID
     const result = await dbRun(
       `INSERT INTO prompts (username, title, tagline, model, text, image_data, accepted, isTrending) 
        VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
       [user.username, title, tagline, model, text, imageData, user.role === 'admin' ? 1 : 0, 0]
     );
     
+    console.log('Insert result:', result);
+    
+    // ✅ FIXED: Check if we got a valid lastID
+    if (!result || result.lastID === undefined || result.lastID === null) {
+      throw new Error('Failed to get prompt ID after insertion');
+    }
+    
     // Get the created prompt
     const newPrompt = await dbGet('SELECT * FROM prompts WHERE id = ?', [result.lastID]);
+    
+    if (!newPrompt) {
+      throw new Error('Failed to retrieve created prompt');
+    }
     
     // Convert for response
     const processedPrompt = {
@@ -423,6 +453,8 @@ async function handleCreatePrompt(req, res) {
       accepted: Boolean(newPrompt.accepted),
       isTrending: Boolean(newPrompt.isTrending)
     };
+    
+    console.log('Created prompt successfully:', processedPrompt.id);
     
     return res.status(201).json(processedPrompt);
   } catch (error) {
@@ -500,7 +532,7 @@ async function handleDeletePrompt(req, res) {
     
     const promptId = req.url.split('/').pop();
     
-    const result = await dbRun('DELETE FROM prompts WHERE id = ?', [promptId]);
+    await dbRun('DELETE FROM prompts WHERE id = ?', [promptId]);
     
     return res.json({ message: 'Prompt deleted successfully' });
   } catch (error) {
