@@ -39,6 +39,8 @@ try {
     const adminPasswordHash = crypto.createHash('sha256').update('admin123').digest('hex');
     db.run(`INSERT OR IGNORE INTO users (username, password, role) VALUES (?, ?, ?)`, 
       ['admin', adminPasswordHash, 'admin']);
+    
+    console.log('Database initialized with admin user: admin / admin123');
   });
   
 } catch (error) {
@@ -71,6 +73,8 @@ module.exports = async (req, res) => {
   try {
     const path = req.url.split('?')[0];
     
+    console.log(`Incoming request: ${req.method} ${path}`);
+    
     // Route handling
     if (req.method === 'POST' && path === '/api/register') {
       return await handleRegister(req, res);
@@ -101,7 +105,7 @@ module.exports = async (req, res) => {
     }
   } catch (error) {
     console.error('Server error:', error);
-    return res.status(500).json({ error: 'Internal server error' });
+    return res.status(500).json({ error: 'Internal server error: ' + error.message });
   }
 };
 
@@ -189,6 +193,8 @@ async function handleRegister(req, res) {
       JWT_SECRET
     );
     
+    console.log(`User registered successfully: ${username}`);
+    
     return res.status(201).json({
       access_token: token,
       username: username,
@@ -209,6 +215,8 @@ async function handleLogin(req, res) {
       return res.status(400).json({ error: 'Username and password required' });
     }
     
+    console.log(`Login attempt for user: ${username}`);
+    
     // Get user
     const user = await dbGet('SELECT * FROM users WHERE username = ?', [username]);
     
@@ -221,7 +229,7 @@ async function handleLogin(req, res) {
     const hashedPassword = hashPassword(password);
     const isPasswordValid = (hashedPassword === user.password);
     
-    console.log('Login attempt:', { 
+    console.log('Password check:', { 
       username, 
       providedHash: hashedPassword, 
       storedHash: user.password,
@@ -238,6 +246,8 @@ async function handleLogin(req, res) {
       { username: user.username, role: user.role },
       JWT_SECRET
     );
+    
+    console.log(`Login successful for user: ${username}, role: ${user.role}`);
     
     return res.json({
       access_token: token,
@@ -290,30 +300,35 @@ async function handleFileUpload(req, res) {
 }
 
 async function handleGetPrompts(req, res) {
-  const url = new URL(req.url, `http://${req.headers.host}`);
-  const publicOnly = url.searchParams.get('public') !== 'false';
-  
-  let query = 'SELECT * FROM prompts';
-  let params = [];
-  
-  if (publicOnly) {
-    query += ' WHERE accepted = ?';
-    params.push(1);
+  try {
+    const url = new URL(req.url, `http://${req.headers.host}`);
+    const publicOnly = url.searchParams.get('public') !== 'false';
+    
+    let query = 'SELECT * FROM prompts';
+    let params = [];
+    
+    if (publicOnly) {
+      query += ' WHERE accepted = ?';
+      params.push(1);
+    }
+    
+    query += ' ORDER BY created_at DESC';
+    
+    const prompts = await dbAll(query, params);
+    
+    // Convert for frontend
+    const processedPrompts = prompts.map(prompt => ({
+      ...prompt,
+      image_url: prompt.image_data || null,
+      accepted: Boolean(prompt.accepted),
+      isTrending: Boolean(prompt.isTrending)
+    }));
+    
+    return res.json(processedPrompts);
+  } catch (error) {
+    console.error('Error fetching prompts:', error);
+    return res.status(500).json({ error: 'Failed to fetch prompts' });
   }
-  
-  query += ' ORDER BY created_at DESC';
-  
-  const prompts = await dbAll(query, params);
-  
-  // Convert for frontend
-  const processedPrompts = prompts.map(prompt => ({
-    ...prompt,
-    image_url: prompt.image_data || null,
-    accepted: Boolean(prompt.accepted),
-    isTrending: Boolean(prompt.isTrending)
-  }));
-  
-  return res.json(processedPrompts);
 }
 
 async function handleGetPendingPrompts(req, res) {
@@ -484,18 +499,23 @@ async function handleAdminStats(req, res) {
 }
 
 async function handlePublicStats(req, res) {
-  const prompts = await dbAll('SELECT * FROM prompts WHERE accepted = ?', [1]);
-  
-  const acceptedPrompts = prompts || [];
-  const uniqueUsers = new Set(acceptedPrompts.map(p => p.username));
-  const trendingPrompts = acceptedPrompts.filter(p => p.isTrending);
-  
-  return res.json({
-    total_prompts: acceptedPrompts.length,
-    total_users: uniqueUsers.size,
-    trending_prompts: trendingPrompts.length,
-    categories: 0
-  });
+  try {
+    const prompts = await dbAll('SELECT * FROM prompts WHERE accepted = ?', [1]);
+    
+    const acceptedPrompts = prompts || [];
+    const uniqueUsers = new Set(acceptedPrompts.map(p => p.username));
+    const trendingPrompts = acceptedPrompts.filter(p => p.isTrending);
+    
+    return res.json({
+      total_prompts: acceptedPrompts.length,
+      total_users: uniqueUsers.size,
+      trending_prompts: trendingPrompts.length,
+      categories: 0
+    });
+  } catch (error) {
+    console.error('Error fetching public stats:', error);
+    return res.status(500).json({ error: 'Failed to fetch stats' });
+  }
 }
 
 async function handleBulkAction(req, res) {
