@@ -1,13 +1,11 @@
-// api/index.js
 const sqlite3 = require('sqlite3').verbose();
 const { promisify } = require('util');
 const crypto = require('crypto');
-const path = require('path');
 
 // Initialize SQLite database
 let db;
 try {
-  // Use in-memory database for Vercel (persists during function execution)
+  // Use in-memory database for Vercel
   db = new sqlite3.Database(':memory:');
   
   // Initialize tables
@@ -29,7 +27,7 @@ try {
       tagline TEXT NOT NULL,
       model TEXT NOT NULL,
       text TEXT NOT NULL,
-      image_data TEXT, -- Base64 encoded image
+      image_data TEXT,
       image_filename TEXT,
       image_type TEXT,
       accepted BOOLEAN DEFAULT 0,
@@ -37,10 +35,10 @@ try {
       created_at DATETIME DEFAULT CURRENT_TIMESTAMP
     )`);
     
-    // Insert default admin user
-    const adminPassword = crypto.createHash('sha256').update('admin123').digest('hex');
+    // Insert default admin user with proper password hashing
+    const adminPasswordHash = crypto.createHash('sha256').update('admin123').digest('hex');
     db.run(`INSERT OR IGNORE INTO users (username, password, role) VALUES (?, ?, ?)`, 
-      ['admin', adminPassword, 'admin']);
+      ['admin', adminPasswordHash, 'admin']);
   });
   
 } catch (error) {
@@ -137,14 +135,8 @@ const jwt = {
 const JWT_SECRET = process.env.JWT_SECRET || '484848484848484848484848484848484848484884848swkjhdjwbjhjdh3djbjd3484848484848484';
 
 // Password hashing
-const bcrypt = {
-  hash: (password) => {
-    return crypto.createHash('sha256').update(password).digest('hex');
-  },
-  compare: (password, hash) => {
-    const hashedPassword = crypto.createHash('sha256').update(password).digest('hex');
-    return hashedPassword === hash;
-  }
+const hashPassword = (password) => {
+  return crypto.createHash('sha256').update(password).digest('hex');
 };
 
 // Auth middleware
@@ -185,25 +177,22 @@ async function handleRegister(req, res) {
     }
     
     // Create user
-    const hashedPassword = bcrypt.hash(password);
+    const hashedPassword = hashPassword(password);
     const result = await dbRun(
       'INSERT INTO users (username, password, role) VALUES (?, ?, ?)',
       [username, hashedPassword, 'user']
     );
     
-    // Get the created user
-    const newUser = await dbGet('SELECT * FROM users WHERE username = ?', [username]);
-    
     // Create token
     const token = jwt.sign(
-      { username: newUser.username, role: newUser.role },
+      { username: username, role: 'user' },
       JWT_SECRET
     );
     
     return res.status(201).json({
       access_token: token,
-      username: newUser.username,
-      role: newUser.role,
+      username: username,
+      role: 'user',
       message: 'Registration successful'
     });
   } catch (error) {
@@ -224,13 +213,23 @@ async function handleLogin(req, res) {
     const user = await dbGet('SELECT * FROM users WHERE username = ?', [username]);
     
     if (!user) {
+      console.log('User not found:', username);
       return res.status(401).json({ error: 'Invalid credentials' });
     }
     
     // Check password
-    const isPasswordValid = bcrypt.compare(password, user.password);
+    const hashedPassword = hashPassword(password);
+    const isPasswordValid = (hashedPassword === user.password);
+    
+    console.log('Login attempt:', { 
+      username, 
+      providedHash: hashedPassword, 
+      storedHash: user.password,
+      isValid: isPasswordValid 
+    });
     
     if (!isPasswordValid) {
+      console.log('Password mismatch for user:', username);
       return res.status(401).json({ error: 'Invalid credentials' });
     }
     
@@ -267,20 +266,13 @@ async function handleFileUpload(req, res) {
     const base64Data = base64File.replace(/^data:image\/\w+;base64,/, '');
     
     // Validate file size (5MB limit)
-    if (base64Data.length > 7 * 1024 * 1024) { // Base64 is ~33% larger
+    if (base64Data.length > 7 * 1024 * 1024) {
       return res.status(400).json({ error: 'File size must be less than 5MB' });
     }
     
     // Generate unique filename
     const fileExt = filename.split('.').pop() || 'jpg';
     const uniqueFilename = `${user.username}_${Date.now()}.${fileExt}`;
-    
-    console.log('Processing file upload:', { 
-      username: user.username, 
-      filename: uniqueFilename,
-      size: base64Data.length,
-      type: filetype 
-    });
     
     return res.json({
       url: `data:${filetype || 'image/jpeg'};base64,${base64Data}`,
@@ -313,7 +305,7 @@ async function handleGetPrompts(req, res) {
   
   const prompts = await dbAll(query, params);
   
-  // Convert image_data to URL for frontend
+  // Convert for frontend
   const processedPrompts = prompts.map(prompt => ({
     ...prompt,
     image_url: prompt.image_data || null,
@@ -337,7 +329,7 @@ async function handleGetPendingPrompts(req, res) {
       [0]
     );
     
-    // Convert image_data to URL for frontend
+    // Convert for frontend
     const processedPrompts = prompts.map(prompt => ({
       ...prompt,
       image_url: prompt.image_data || null,
@@ -502,7 +494,7 @@ async function handlePublicStats(req, res) {
     total_prompts: acceptedPrompts.length,
     total_users: uniqueUsers.size,
     trending_prompts: trendingPrompts.length,
-    categories: 0 // Start with 0 categories
+    categories: 0
   });
 }
 
