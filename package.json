@@ -1,0 +1,29 @@
+{
+  "name": "promptzen-backend",
+  "version": "1.0.0",
+  "description": "Backend for PromptZen - AI Prompt Sharing Platform",
+  "main": "api/index.js",
+  "scripts": {
+    "dev": "vercel dev",
+    "start": "node api/index.js",
+    "deploy": "vercel --prod"
+  },
+  "dependencies": {
+    "sqlite3": "^5.1.6"
+  },
+  "devDependencies": {
+    "vercel": "^28.16.0"
+  },
+  "keywords": [
+    "ai",
+    "prompts",
+    "sqlite",
+    "vercel",
+    "serverless"
+  ],
+  "author": "Code Ronins",
+  "license": "MIT",
+  "engines": {
+    "node": ">=18.x"
+  }
+}
