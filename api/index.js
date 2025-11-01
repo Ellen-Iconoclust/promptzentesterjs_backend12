@@ -1,14 +1,27 @@
 const sqlite3 = require('sqlite3').verbose();
 const { promisify } = require('util');
 const crypto = require('crypto');
+const fs = require('fs');
+const path = require('path');
 
-// Initialize SQLite database
+// Initialize SQLite database with PERSISTENT storage
 let db;
 try {
-  // Use in-memory database for Vercel
-  db = new sqlite3.Database(':memory:');
+  // Use persistent database file in /tmp directory (writable in Vercel)
+  const dbPath = '/tmp/promptzen.db';
   
-  // Initialize tables
+  // Check if database file exists, if not we'll initialize it
+  const dbExists = fs.existsSync(dbPath);
+  
+  db = new sqlite3.Database(dbPath, (err) => {
+    if (err) {
+      console.error('Error opening database:', err);
+    } else {
+      console.log('Connected to SQLite database at:', dbPath);
+    }
+  });
+  
+  // Initialize tables if this is a new database
   db.serialize(() => {
     // Users table
     db.run(`CREATE TABLE IF NOT EXISTS users (
@@ -35,41 +48,48 @@ try {
       created_at DATETIME DEFAULT CURRENT_TIMESTAMP
     )`);
     
-    // Insert default admin user with proper password hashing
-    const adminPasswordHash = crypto.createHash('sha256').update('admin123').digest('hex');
-    db.run(`INSERT OR IGNORE INTO users (username, password, role) VALUES (?, ?, ?)`, 
-      ['admin', adminPasswordHash, 'admin']);
-    
-    // Insert some sample prompts for testing
-    const samplePrompts = [
-      {
-        username: 'admin',
-        title: 'Cyberpunk Cityscape',
-        tagline: 'Futuristic neon-lit urban environment',
-        model: 'Midjourney',
-        text: 'Create a cyberpunk cityscape at night with neon lights, flying cars, and towering skyscrapers. Use vibrant colors like electric blue, hot pink, and neon green. Style: cinematic, detailed, 8k resolution --ar 16:9',
-        image_data: 'https://images.unsplash.com/photo-1487958449943-2429e8be8625?w=400&h=300&fit=crop',
-        accepted: 1,
-        isTrending: 1
-      },
-      {
-        username: 'admin',
-        title: 'Fantasy Dragon',
-        tagline: 'Majestic dragon in mystical landscape',
-        model: 'DALL-E',
-        text: 'A majestic dragon with iridescent scales flying over a mystical landscape with floating islands and waterfalls. Epic fantasy style, highly detailed, dramatic lighting --ar 3:2',
-        image_data: 'https://images.unsplash.com/photo-1518709268805-4e9042af2176?w=400&h=300&fit=crop',
-        accepted: 1,
-        isTrending: 1
-      }
-    ];
-    
-    samplePrompts.forEach(prompt => {
-      db.run(`INSERT OR IGNORE INTO prompts (username, title, tagline, model, text, image_data, accepted, isTrending) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
-        [prompt.username, prompt.title, prompt.tagline, prompt.model, prompt.text, prompt.image_data, prompt.accepted, prompt.isTrending]);
-    });
-    
-    console.log('Database initialized with admin user: admin / admin123 and sample prompts');
+    // Only insert default data if the database is newly created
+    if (!dbExists) {
+      console.log('Initializing new database with default data...');
+      
+      // Insert default admin user with proper password hashing
+      const adminPasswordHash = crypto.createHash('sha256').update('admin123').digest('hex');
+      db.run(`INSERT OR IGNORE INTO users (username, password, role) VALUES (?, ?, ?)`, 
+        ['admin', adminPasswordHash, 'admin']);
+      
+      // Insert some sample prompts for testing
+      const samplePrompts = [
+        {
+          username: 'admin',
+          title: 'Cyberpunk Cityscape',
+          tagline: 'Futuristic neon-lit urban environment',
+          model: 'Midjourney',
+          text: 'Create a cyberpunk cityscape at night with neon lights, flying cars, and towering skyscrapers. Use vibrant colors like electric blue, hot pink, and neon green. Style: cinematic, detailed, 8k resolution --ar 16:9',
+          image_data: 'https://images.unsplash.com/photo-1487958449943-2429e8be8625?w=400&h=300&fit=crop',
+          accepted: 1,
+          isTrending: 1
+        },
+        {
+          username: 'admin',
+          title: 'Fantasy Dragon',
+          tagline: 'Majestic dragon in mystical landscape',
+          model: 'DALL-E',
+          text: 'A majestic dragon with iridescent scales flying over a mystical landscape with floating islands and waterfalls. Epic fantasy style, highly detailed, dramatic lighting --ar 3:2',
+          image_data: 'https://images.unsplash.com/photo-1518709268805-4e9042af2176?w=400&h=300&fit=crop',
+          accepted: 1,
+          isTrending: 1
+        }
+      ];
+      
+      samplePrompts.forEach(prompt => {
+        db.run(`INSERT OR IGNORE INTO prompts (username, title, tagline, model, text, image_data, accepted, isTrending) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+          [prompt.username, prompt.title, prompt.tagline, prompt.model, prompt.text, prompt.image_data, prompt.accepted, prompt.isTrending]);
+      });
+      
+      console.log('Database initialized with admin user: admin / admin123 and sample prompts');
+    } else {
+      console.log('Using existing database with persistent data');
+    }
   });
   
 } catch (error) {
@@ -145,7 +165,11 @@ module.exports = async (req, res) => {
     } else if (req.method === 'POST' && path === '/api/admin/prompts/bulk-action') {
       return await handleBulkAction(req, res);
     } else if (req.method === 'GET' && path === '/') {
-      return res.status(200).json({ message: 'PromptZen API is running!', status: 'success' });
+      return res.status(200).json({ 
+        message: 'PromptZen API is running!', 
+        status: 'success',
+        database: 'persistent'
+      });
     } else {
       return res.status(404).json({ error: 'Route not found' });
     }
